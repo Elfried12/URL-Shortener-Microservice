@@ -1,47 +1,26 @@
 require('dotenv').config();
-import mongoose from 'mongoose';
-import bodyParser from 'body-parser';
-import dns from 'dns';
-import { url } from 'inspector';
 const express = require('express');
-const bodyParser = require('body-parser');
+const urlparser = require('url');
 const dns = require('dns');
-const url = require('url');
 const mongoose = require('mongoose');
+const {MongoClient} = require('mongodb');
 const cors = require('cors');
 const app = express();
-
-// Middleware
-app.use(bodyParser.urlencoded({ extended: false }));
-
-// Stockage temporaire pour les URLs
-const urlDatabase = [];
-
-// Route pour raccourcir l'URL
-app.post('/api/shorturl', (req, res) => {
-  const originalUrl = req.body.url;
-  const parsedUrl = new URL(originalUrl);
-
-  if (!parsedUrl.hostname) {
-    return res.json({ error: 'invalid url' });
-  }
-
-  dns.lookup(parsedUrl.hostname, (err) => {
-    if (err) {
-      return res.json({ error: 'invalid url' });
-    }
-
-    const shortUrl = urlDatabase.length + 1;
-    urlDatabase.push({ original_url: originalUrl, short_url: shortUrl });
-    res.json({ original_url: originalUrl, short_url: shortUrl });
-  });
-});
-
 
 // Basic Configuration
 const port = process.env.PORT || 3000;
 
+const client = new MongoClient(process.env.DB_URL);
+
+const db = client.db("ShortURL");
+
+const urls=db.collection("dexter");
+
+
 app.use(cors());
+
+app.use(express.json());
+app.use(express.urlencoded({extended: true}));
 
 app.use('/public', express.static(`${process.cwd()}/public`));
 
@@ -50,17 +29,31 @@ app.get('/', function(req, res) {
 });
 
 // Your first API endpoint
-app.get('/api/shorturl/:short_url', function(_req, res) {
-  const shortUrl = parseInt(req.params.short_url, 10);
-  const record = urlDatabase.find(entry => entry.short_url === shortUrl);
-
-  if (record) {
-    res.redirect(record.original_url);
-  } else {
-    res.json({ error: 'No short URL found for the given input' });
+app.post('/api/shorturl', function(req, res) {
+  console.log(req.body)
+  const url =req.body.url
+  const dnslookup = dns.lookup(urlparser.parse(url).hostname,async(err,address) => {
+    if(!address){
+    res.json({error: "Invalid URL"})
+  }else{
+      const urlcount =await urls.countDocuments({})
+      const urlDoc ={
+        url,
+        short_url:urlcount
+      }
+      const result = await urls.insertOne(urlDoc)
+      console.log(result);
+      res.json({original_url: url,short_url:urlcount})
   }
-
+  })
 });
+
+app.get('/api/shorturl/:short_url',async(req,res)=>{
+    const shorturl = req.params.short_url
+    const urlDoc = await urls.findOne({short_url: +shorturl})
+    res.redirect(urlDoc.url)
+
+})
 
 app.listen(port, function() {
   console.log(`Listening on port ${port}`);
